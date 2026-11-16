@@ -1,0 +1,5 @@
+<Bindings>
+	<Binding name="AQUEST_TOGGLE" header="AQUEST" category="ADDONS">
+		AQuest_ToggleBinding()
+	</Binding>
+</Bindings>

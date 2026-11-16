@@ -1,0 +1,24 @@
+## Interface: 16001
+## Title: AQuest
+## Notes: Quest givers, objectives and turn-ins on the map and minimap, with a tracker and quest journal
+## Version: 0.1.0
+## Category: Quests
+## IconTexture: Interface\GossipFrame\AvailableQuestIcon
+## Dependencies: ACore
+## SavedVariables: AQuestDB
+## SavedVariablesPerCharacter: AQuestCharDB
+
+Core.lua
+
+Data\Quests.lua
+Data\Npcs.lua
+Data\Objects.lua
+Data\Items.lua
+Data\Index.lua
+
+Database.lua
+Log.lua
+Pins.lua
+Tracker.lua
+Tooltip.lua
+Journal.lua
