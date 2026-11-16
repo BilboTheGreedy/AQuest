@@ -22,3 +22,4 @@ Pins.lua
 Tracker.lua
 Tooltip.lua
 Journal.lua
+API.lua
