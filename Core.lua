@@ -17,13 +17,14 @@ local defaults = {
 }
 
 local charDefaults = {
-	untracked = {},
+	tracked = {},
 }
 
-ACore.New(ADDON, ns, { db = "AQuestDB", defaults = defaults, char = "AQuestCharDB", charDefaults = charDefaults })
+ACore.New(ADDON, ns, { db = "AQuestDB", defaults = defaults, profile = true, char = "AQuestCharDB", charDefaults = charDefaults })
 
 ACore.Register({
 	name = "AQuest",
+	options = function() return ns.Options() end,
 	title = "AQuest",
 	slash = "/aquest",
 	desc = "quest map, tracker and journal",

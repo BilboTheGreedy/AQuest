@@ -15,6 +15,16 @@ local STATE_ICON = {
 	done = "Interface\\RaidFrame\\ReadyCheck-Ready",
 }
 
+function ns.CanWaypoint()
+	return (AWay and AWay.Add) or (AMap and AMap.SetWaypoint) or false
+end
+
+function ns.Waypoint(map, x, y, title)
+	if AWay and AWay.Add then return AWay.Add(map, x, y, title) and true or false end
+	if AMap and AMap.SetWaypoint then return AMap.SetWaypoint(map, x, y, title) and true or false end
+	return false
+end
+
 local function questState(q)
 	local e = ns.Log.quests[q.id]
 	if e then return e.complete and "ready" or "log", e.complete and "Ready to turn in" or "In your quest log" end
@@ -207,14 +217,16 @@ local function createRow(list)
 		local d = self.data
 		if not d then return end
 		if d.kind == "quest" and not d.static then
-			if button == "RightButton" then
+			if IsShiftKeyDown and IsShiftKeyDown() and ns.Log.quests[d.id] then
+				ns.Tracker.SetTracked(d.id, not ns.Tracker.Tracked(d.id))
+			elseif button == "RightButton" then
 				ns.Tracker.ShowOnMap(d.id)
 			else
 				Journal.ShowQuest(d.id)
 			end
 		elseif d.kind == "place" and d.map then
-			if AMap and AMap.SetWaypoint and d.x and IsShiftKeyDown and IsShiftKeyDown() then
-				AMap.SetWaypoint(d.map, d.x, d.y, d.name)
+			if d.x and IsShiftKeyDown and IsShiftKeyDown() and ns.Waypoint(d.map, d.x, d.y, d.name) then
+				return
 			else
 				ns.Pins.ShowOnMap(d.map)
 			end
@@ -249,6 +261,7 @@ local function updateRow(row, d)
 			row.icon:Show()
 		end
 		local right = why
+		if ns.Log.quests[d.id] and ns.Tracker.Tracked(d.id) then right = "Tracked   " .. right end
 		if d.zone and q.z then right = ns.ZoneName(q.z) .. "   " .. why end
 		row.right:SetText(d.static and "" or right)
 	elseif d.kind == "header" then
@@ -261,7 +274,7 @@ local function updateRow(row, d)
 	elseif d.kind == "place" then
 		row.text:SetText(d.text)
 		row.text:SetTextColor(C.text[1], C.text[2], C.text[3])
-		if d.map then row.right:SetText(AMap and "click: map   shift-click: waypoint" or "click: map") end
+		if d.map then row.right:SetText(ns.CanWaypoint() and "click: map   shift-click: waypoint" or "click: map") end
 	else
 		row.text:SetText(d.text or "")
 		if d.good then

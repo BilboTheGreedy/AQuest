@@ -26,7 +26,10 @@ local function line(i)
 	l:SetScript("OnDragStart", function() frame:StartDrag() end)
 	l:SetScript("OnDragStop", function() frame:StopDrag() end)
 	l:SetScript("OnClick", function(self, button)
-		if not self.quest then return end
+		if not self.quest then
+			ns.Journal.Show()
+			return
+		end
 		if button == "RightButton" then
 			local id = self.quest
 			UI.Menu(self, {
@@ -49,12 +52,32 @@ local function line(i)
 	return l
 end
 
+local function watched(id)
+	if C_QuestLog and C_QuestLog.GetQuestWatchType then
+		local ok, kind = pcall(C_QuestLog.GetQuestWatchType, id)
+		if ok and kind ~= nil then return true end
+	end
+	if IsQuestWatched and GetQuestLogIndexByID then
+		local ok, index = pcall(GetQuestLogIndexByID, id)
+		if ok and type(index) == "number" and index > 0 then
+			local ok2, w = pcall(IsQuestWatched, index)
+			if ok2 and w then return true end
+		end
+	end
+	return false
+end
+
 function Tracker.Tracked(id)
-	return not ns.chardb.untracked[id]
+	return ns.chardb.tracked[id] or watched(id)
 end
 
 function Tracker.SetTracked(id, on)
-	ns.chardb.untracked[id] = (not on) and true or nil
+	ns.chardb.tracked[id] = on and true or nil
+	if on then
+		if C_QuestLog and C_QuestLog.AddQuestWatch then pcall(C_QuestLog.AddQuestWatch, id) end
+	else
+		if C_QuestLog and C_QuestLog.RemoveQuestWatch then pcall(C_QuestLog.RemoveQuestWatch, id) end
+	end
 	Tracker.Refresh()
 	ns:Fire("TRACK_CHANGED")
 end
@@ -184,6 +207,22 @@ function Tracker.Refresh()
 			y = y - 4
 		end
 	end
+	if tracked == 0 and ns.Log.count > 0 then
+		n = n + 1
+		local l = line(n)
+		l.quest = nil
+		l:ClearAllPoints()
+		l:SetPoint("TOPLEFT", 0, y)
+		l:SetPoint("RIGHT", 0, 0)
+		l.dot:Hide()
+		l.text:ClearAllPoints()
+		l.text:SetPoint("LEFT", 0, 0)
+		l.text:SetPoint("RIGHT", 0, 0)
+		l.text:SetTextColor(C.dim[1], C.dim[2], C.dim[3])
+		l.text:SetText("Nothing tracked. Click here to pick quests.")
+		l:Show()
+		y = y - 16
+	end
 	for i = n + 1, #lines do lines[i]:Hide() end
 	frame.title:SetText("Quests")
 	frame.count:SetText(tracked .. " / " .. ns.Log.count)
@@ -191,7 +230,14 @@ function Tracker.Refresh()
 	frame:SetShown(ns.Log.count > 0)
 end
 
-ns:Listen("LOG_CHANGED", Tracker.Refresh)
+ns:Listen("LOG_CHANGED", function()
+	for id in pairs(ns.chardb.tracked) do
+		if not ns.Log.quests[id] then ns.chardb.tracked[id] = nil end
+	end
+	Tracker.Refresh()
+end)
+ns:On("QUEST_WATCH_LIST_CHANGED", function() ns.Debounce("watch", 0.2, Tracker.Refresh) end)
+ns:On("QUEST_WATCH_UPDATE", function() ns.Debounce("watch", 0.2, Tracker.Refresh) end)
 ns:Listen("OPTIONS", Tracker.Refresh)
 ns:Listen("LAYOUT_RESET", function()
 	if frame then frame:Restore() end
