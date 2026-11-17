@@ -25,6 +25,33 @@ function ns.Waypoint(map, x, y, title)
 	return false
 end
 
+local lastWay
+
+function ns.QuestWaypoint(map, x, y, title)
+	if not map or not x or not y then return false end
+	if AWay and AWay.Add then
+		if lastWay and AWay.List and AWay.Remove then
+			for i, w in ipairs(AWay.List()) do
+				if w.map == lastWay[1] and math.abs(w.x - lastWay[2]) < 0.0005 and math.abs(w.y - lastWay[3]) < 0.0005 then
+					AWay.Remove(i)
+					break
+				end
+			end
+		end
+		lastWay = { map, x, y }
+	end
+	return ns.Waypoint(map, x, y, title)
+end
+
+function ns.NearestWaypoint(id)
+	local map, x, y, title = ns.Pins.Nearest(id)
+	if not map then
+		ns.Print("no known place for " .. ns.QuestTitle(id))
+		return false
+	end
+	return ns.QuestWaypoint(map, x, y, ns.QuestTitle(id) .. (title and (": " .. title) or ""))
+end
+
 local function questState(q)
 	local e = ns.Log.quests[q.id]
 	if e then return e.complete and "ready" or "log", e.complete and "Ready to turn in" or "In your quest log" end
@@ -99,6 +126,9 @@ local function detailRows(id)
 	end
 	rows[#rows + 1] = { kind = "header", text = "Actions" }
 	rows[#rows + 1] = { kind = "action", text = "Show on the map", func = function() ns.Tracker.ShowOnMap(id) end }
+	if ns.CanWaypoint() then
+		rows[#rows + 1] = { kind = "action", text = "Waypoint to the nearest place", func = function() ns.NearestWaypoint(id) end }
+	end
 	if e then
 		local tracked = ns.Tracker.Tracked(id)
 		rows[#rows + 1] = {
@@ -225,7 +255,7 @@ local function createRow(list)
 				Journal.ShowQuest(d.id)
 			end
 		elseif d.kind == "place" and d.map then
-			if d.x and IsShiftKeyDown and IsShiftKeyDown() and ns.Waypoint(d.map, d.x, d.y, d.name) then
+			if d.x and IsShiftKeyDown and IsShiftKeyDown() and ns.QuestWaypoint(d.map, d.x, d.y, d.name) then
 				return
 			else
 				ns.Pins.ShowOnMap(d.map)

@@ -41,55 +41,139 @@ local function add(index, list, pts, kind, quest, title, text)
 	end
 end
 
+local function have(item)
+	local count = C_Item and C_Item.GetItemCount or GetItemCount
+	if not count then return false end
+	local ok, n = pcall(count, item)
+	return ok and type(n) == "number" and not ns.IsSecret(n) and n > 0
+end
+
+local function itemPins(index, list, map, id, it, text, depth)
+	for i = 1, math.min(#it.npcs, 40) do
+		local n = ns.Npc(it.npcs[i])
+		if n then add(index, list, n.spawns[map], "loot", id, n.name, text) end
+	end
+	for i = 1, math.min(#it.objects, 20) do
+		local ob = ns.Object(it.objects[i])
+		if ob then add(index, list, ob.spawns[map], "object", id, ob.name, text) end
+	end
+	for i = 1, math.min(#it.vendors, 10) do
+		local n = ns.Npc(it.vendors[i])
+		if n then add(index, list, n.spawns[map], "loot", id, n.name, "Sold here: " .. it.name) end
+	end
+	if depth > 0 then
+		for i = 1, math.min(#it.items, 5) do
+			local inner = ns.Item(it.items[i])
+			if inner then itemPins(index, list, map, id, inner, text, depth - 1) end
+		end
+	end
+end
+
 local function objectivePins(index, list, map, e)
 	local q = e.data
 	local id = e.id
 	local before = #list
-	for _, npc in ipairs(q.oc or EMPTY) do
+	local slots = q.oc and #q.oc or 0
+	for i, npc in ipairs(q.oc or EMPTY) do
 		local n = ns.Npc(npc)
 		if n then
-			local o = ns.ObjectiveFor(e, n.name)
+			local o = ns.ObjectiveFor(e, n.name, "monster", i)
 			if not o or not o.done then add(index, list, n.spawns[map], "slay", id, n.name, o and o.text) end
 		end
 	end
-	for _, npc in ipairs(q.ok or EMPTY) do
-		local n = ns.Npc(npc)
-		if n then add(index, list, n.spawns[map], "slay", id, n.name) end
-	end
-	for _, obj in ipairs(q.oo or EMPTY) do
-		local o = ns.Object(obj)
-		if o then
-			local lo = ns.ObjectiveFor(e, o.name)
-			if not lo or not lo.done then add(index, list, o.spawns[map], "object", id, o.name, lo and lo.text) end
-		end
-	end
-	for _, item in ipairs(q.oi or EMPTY) do
-		local it = ns.Item(item)
-		if it then
-			local o = ns.ObjectiveFor(e, it.name)
-			if not o or not o.done then
-				local text = o and o.text or it.name
-				for i = 1, math.min(#it.npcs, 40) do
-					local n = ns.Npc(it.npcs[i])
-					if n then add(index, list, n.spawns[map], "loot", id, n.name, text) end
-				end
-				for i = 1, math.min(#it.objects, 20) do
-					local ob = ns.Object(it.objects[i])
-					if ob then add(index, list, ob.spawns[map], "object", id, ob.name, text) end
-				end
-				for i = 1, math.min(#it.vendors, 10) do
-					local n = ns.Npc(it.vendors[i])
-					if n then add(index, list, n.spawns[map], "loot", id, n.name, "Sold here: " .. it.name) end
-				end
+	local exact = q.ok and ns.CountType(e, "monster") == slots + #q.ok
+	for i, group in ipairs(q.ok or EMPTY) do
+		local o = exact and ns.ObjectiveFor(e, nil, "monster", slots + i) or nil
+		if not o or not o.done then
+			for _, npc in ipairs(group) do
+				local n = ns.Npc(npc)
+				if n then add(index, list, n.spawns[map], "slay", id, n.name, o and o.text) end
 			end
 		end
 	end
-	if q.te then add(index, list, ns.Spawns(q.te)[map], "event", id, e.title or q.n) end
+	for i, obj in ipairs(q.oo or EMPTY) do
+		local o = ns.Object(obj)
+		if o then
+			local lo = ns.ObjectiveFor(e, o.name, "object", i)
+			if not lo or not lo.done then add(index, list, o.spawns[map], "object", id, o.name, lo and lo.text) end
+		end
+	end
+	for i, item in ipairs(q.oi or EMPTY) do
+		local it = ns.Item(item)
+		if it then
+			local o = ns.ObjectiveFor(e, it.name, "item", i)
+			if not o or not o.done then itemPins(index, list, map, id, it, o and o.text or it.name, 1) end
+		end
+	end
+	for _, item in ipairs(q.rs or EMPTY) do
+		local it = ns.Item(item)
+		if it and not have(item) then itemPins(index, list, map, id, it, "Needed: " .. it.name, 0) end
+	end
+	if q.te then
+		local ev = ns.CountType(e, "event") == 1 and ns.ObjectiveFor(e, nil, "event", 1) or nil
+		if not ev or not ev.done then add(index, list, ns.Spawns(q.te)[map], "event", id, e.title or q.n, ev and ev.text) end
+	end
 	for _, s in ipairs(q.eo or EMPTY) do
 		add(index, list, ns.Spawns(s)[map], "event", id, e.title or q.n)
 	end
 	local limit = before + 80
 	for i = #list, limit + 1, -1 do list[i] = nil end
+end
+
+local function turninPins(index, list, map, e)
+	local q = e.data
+	local kind = e.complete and "turnin" or "turnin_wait"
+	for _, npc in ipairs(q.e1 or EMPTY) do
+		local n = ns.Npc(npc)
+		if n then add(index, list, n.spawns[map], kind, e.id, n.name) end
+	end
+	for _, obj in ipairs(q.e2 or EMPTY) do
+		local o = ns.Object(obj)
+		if o then add(index, list, o.spawns[map], kind, e.id, o.name) end
+	end
+end
+
+local STARTER_SOURCES = 10
+
+local function starterPins(index, list, map, q)
+	local id = q.id
+	local kind = q.rep and "repeatable" or "available"
+	for _, npc in ipairs(q.s1 or EMPTY) do
+		local n = ns.Npc(npc)
+		if n then add(index, list, n.spawns[map], kind, id, n.name) end
+	end
+	for _, obj in ipairs(q.s2 or EMPTY) do
+		local o = ns.Object(obj)
+		if o then add(index, list, o.spawns[map], kind, id, o.name) end
+	end
+	for _, item in ipairs(q.s3 or EMPTY) do
+		local it = ns.Item(item)
+		if it and #it.npcs + #it.objects <= STARTER_SOURCES and not have(item) then
+			local text = "Drops: " .. it.name
+			for _, npc in ipairs(it.npcs) do
+				local n = ns.Npc(npc)
+				if n then add(index, list, n.spawns[map], kind, id, n.name, text) end
+			end
+			for _, obj in ipairs(it.objects) do
+				local o = ns.Object(obj)
+				if o then add(index, list, o.spawns[map], kind, id, o.name, text) end
+			end
+		end
+	end
+end
+
+local avail = {}
+
+local function available(map)
+	local c = avail[map]
+	if c and c.rev == ns.Log.rev then return c end
+	c = { rev = ns.Log.rev }
+	for _, id in ipairs(ns.Index("starts", map)) do
+		local q = ns.Quest(id)
+		if q and ns.Shown(q) then c[#c + 1] = q end
+	end
+	avail[map] = c
+	return c
 end
 
 function Pins.Build(map)
@@ -98,38 +182,14 @@ function Pins.Build(map)
 	if db.turnins or db.objectives then
 		for _, id in ipairs(ns.Log.order) do
 			local e = ns.Log.quests[id]
-			local q = e.data
-			if q then
-				if db.turnins then
-					local kind = e.complete and "turnin" or "turnin_wait"
-					for _, npc in ipairs(q.e1 or EMPTY) do
-						local n = ns.Npc(npc)
-						if n then add(index, list, n.spawns[map], kind, id, n.name) end
-					end
-					for _, obj in ipairs(q.e2 or EMPTY) do
-						local o = ns.Object(obj)
-						if o then add(index, list, o.spawns[map], kind, id, o.name) end
-					end
-				end
+			if e.data then
+				if db.turnins then turninPins(index, list, map, e) end
 				if db.objectives and not e.complete then objectivePins(index, list, map, e) end
 			end
 		end
 	end
 	if db.available then
-		for _, id in ipairs(ns.Index("starts", map)) do
-			local q = ns.Quest(id)
-			if q and ns.Shown(q) then
-				local kind = q.rep and "repeatable" or "available"
-				for _, npc in ipairs(q.s1 or EMPTY) do
-					local n = ns.Npc(npc)
-					if n then add(index, list, n.spawns[map], kind, id, n.name) end
-				end
-				for _, obj in ipairs(q.s2 or EMPTY) do
-					local o = ns.Object(obj)
-					if o then add(index, list, o.spawns[map], kind, id, o.name) end
-				end
-			end
-		end
+		for _, q in ipairs(available(map)) do starterPins(index, list, map, q) end
 	end
 	table.sort(list, function(a, b)
 		local oa, ob = KINDS[a.kind].order, KINDS[b.kind].order
@@ -140,12 +200,35 @@ function Pins.Build(map)
 	return list
 end
 
+function Pins.QuestPoints(id, map)
+	local index, list = {}, {}
+	if not map then return list end
+	local e = ns.Log.quests[id]
+	if e and e.data then
+		if e.complete then
+			turninPins(index, list, map, e)
+		else
+			objectivePins(index, list, map, e)
+		end
+	elseif not e then
+		local q = ns.Quest(id)
+		if q then starterPins(index, list, map, q) end
+	end
+	local out = {}
+	for _, pin in ipairs(list) do
+		if not pin.inside then out[#out + 1] = pin end
+	end
+	if #out == 0 then return list end
+	return out
+end
+
 local function tooltip(self)
 	local pin = self.pin
 	if not pin then return end
 	GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
 	GameTooltip:AddLine(pin.title or "", 1, 1, 1)
 	if pin.inside then GameTooltip:AddLine("Inside this dungeon", 0.58, 0.6, 0.65) end
+	local shown = {}
 	for _, line in ipairs(pin.lines) do
 		local q = ns.Quest(line.quest)
 		local e = ns.Log.quests[line.quest]
@@ -153,13 +236,31 @@ local function tooltip(self)
 		local level = q and ns.QuestLevel(q) or (e and e.level) or 0
 		local r, g, b = ns.DifficultyColor(level)
 		GameTooltip:AddDoubleLine("[" .. level .. "] " .. name, KINDS[line.kind].label, r, g, b, 0.58, 0.6, 0.65)
-		if line.text and line.text ~= KINDS[line.kind].label then
+		if line.text and line.text ~= KINDS[line.kind].label and not shown[line.quest .. line.text] then
+			shown[line.quest .. line.text] = true
 			local cr, cg, cb = ns.QuestColor(line.quest)
 			GameTooltip:AddLine("  " .. line.text, cr, cg, cb)
 		end
 	end
+	if self.map and ns.CanWaypoint and ns.CanWaypoint() then
+		GameTooltip:AddLine("Click: journal   Shift-click: waypoint", 0.45, 0.47, 0.5)
+	end
 	GameTooltip:Show()
 end
+
+local waiting = {}
+
+local function passThrough()
+	if #waiting == 0 then return end
+	if InCombatLockdown and InCombatLockdown() then return end
+	for i = #waiting, 1, -1 do
+		local f = waiting[i]
+		if f.SetPassThroughButtons then pcall(f.SetPassThroughButtons, f, "RightButton", "MiddleButton") end
+		waiting[i] = nil
+	end
+end
+
+ns:On("PLAYER_REGEN_ENABLED", passThrough)
 
 local function create(parent)
 	local f = CreateFrame("Button", nil, parent)
@@ -177,8 +278,16 @@ local function create(parent)
 	f:SetScript("OnLeave", function() GameTooltip:Hide() end)
 	f:RegisterForClicks("LeftButtonUp")
 	f:SetScript("OnClick", function(self)
-		if self.pin and ns.Journal then ns.Journal.ShowQuest(self.pin.quest) end
+		local pin = self.pin
+		if not pin then return end
+		if IsShiftKeyDown and IsShiftKeyDown() and self.map and ns.QuestWaypoint then
+			ns.QuestWaypoint(self.map, pin.x, pin.y, pin.title)
+		elseif ns.Journal then
+			ns.Journal.ShowQuest(pin.quest)
+		end
 	end)
+	waiting[#waiting + 1] = f
+	passThrough()
 	return f
 end
 
@@ -240,6 +349,7 @@ function Pins.RefreshWorld(force)
 			world.pool[i] = f
 		end
 		f:SetScale(pinScale)
+		f.map = map
 		style(f, pin)
 		f:ClearAllPoints()
 		f:SetPoint("CENTER", c, "TOPLEFT", pin.x * w / pinScale, -pin.y * h / pinScale)
@@ -270,22 +380,46 @@ local function playerMap()
 	if ok and type(map) == "number" then return map end
 end
 
+local rects = {}
+
+local function worldRect(map)
+	local r = rects[map]
+	if r ~= nil then return r or nil end
+	r = false
+	if C_Map and C_Map.GetWorldPosFromMapPos and CreateVector2D then
+		local ok, c0, a = pcall(C_Map.GetWorldPosFromMapPos, map, CreateVector2D(0, 0))
+		local ok2, _, b = pcall(C_Map.GetWorldPosFromMapPos, map, CreateVector2D(0.5, 0.5))
+		if ok and ok2 and a and b then
+			local n0, w0 = a.x, a.y
+			local n1, w1 = b.x, b.y
+			if a.GetXY then n0, w0 = a:GetXY() end
+			if b.GetXY then n1, w1 = b:GetXY() end
+			if type(n0) == "number" and type(w0) == "number" and type(n1) == "number" and type(w1) == "number" then
+				r = { north = n0, west = w0, dn = (n1 - n0) * 2, dw = (w1 - w0) * 2, continent = c0 }
+			end
+		end
+	end
+	rects[map] = r
+	return r or nil
+end
+
+function Pins.World(map, x, y)
+	local r = worldRect(map)
+	if not r then return nil end
+	return r.north + r.dn * y, r.west + r.dw * x, r.continent
+end
+
 local function buildMini()
 	mini.pins = {}
 	mini.dirty = false
 	local map = playerMap()
 	mini.map = map
-	if not map or not ns.db.minimap or not C_Map.GetWorldPosFromMapPos or not CreateVector2D then return end
+	if not map or not ns.db.minimap then return end
+	local r = worldRect(map)
+	if not r then return end
 	for _, pin in ipairs(Pins.Build(map)) do
 		if not pin.inside then
-			local ok, _, pos = pcall(C_Map.GetWorldPosFromMapPos, map, CreateVector2D(pin.x, pin.y))
-			if ok and pos then
-				local north, west = pos.x, pos.y
-				if pos.GetXY then north, west = pos:GetXY() end
-				if type(north) == "number" and type(west) == "number" then
-					mini.pins[#mini.pins + 1] = { pin = pin, north = north, west = west }
-				end
-			end
+			mini.pins[#mini.pins + 1] = { pin = pin, north = r.north + r.dn * pin.y, west = r.west + r.dw * pin.x }
 		end
 	end
 end
@@ -295,7 +429,7 @@ function Pins.RefreshMini()
 	local shown = 0
 	if #mini.pins > 0 and UnitPosition and Minimap:IsShown() then
 		local ok, north, west = pcall(UnitPosition, "player")
-		if ok and type(north) == "number" and type(west) == "number" and not ns.IsSecret(north) then
+		if ok and not ns.IsSecret(north) and not ns.IsSecret(west) and type(north) == "number" and type(west) == "number" then
 			local radius = viewRadius()
 			local half = Minimap:GetWidth() / 2
 			local sin, cos
@@ -316,10 +450,11 @@ function Pins.RefreshMini()
 					local f = mini.pool[shown]
 					if not f then
 						f = create(Minimap)
-						f.base = Minimap:GetFrameLevel() + 4
+						f.base = (Minimap:GetFrameLevel() or 0) + 4
 						mini.pool[shown] = f
 					end
 					if f.pin ~= m.pin then style(f, m.pin, true) end
+					f.map = mini.map
 					f:ClearAllPoints()
 					f:SetPoint("CENTER", Minimap, "CENTER", dx / radius * half, -dy / radius * half)
 					f:Show()
@@ -341,7 +476,10 @@ local function dirty()
 end
 
 ns:Listen("LOG_CHANGED", dirty)
-ns:Listen("OPTIONS", dirty)
+ns:Listen("OPTIONS", function()
+	avail = {}
+	dirty()
+end)
 ns:On("ZONE_CHANGED_NEW_AREA", function() mini.dirty = true end)
 
 ns:Listen("LOGIN", function()
@@ -355,6 +493,9 @@ ns:Listen("LOGIN", function()
 			Pins.RefreshWorld()
 		end)
 		watcher:SetScript("OnShow", function() Pins.RefreshWorld(true) end)
+		if hooksecurefunc and WorldMapFrame.OnMapChanged then
+			pcall(hooksecurefunc, WorldMapFrame, "OnMapChanged", function() Pins.RefreshWorld() end)
+		end
 	end
 	local ticker = CreateFrame("Frame")
 	local elapsed = 0
@@ -374,4 +515,37 @@ function Pins.ShowOnMap(map)
 		if ShowUIPanel then ShowUIPanel(WorldMapFrame) end
 		if WorldMapFrame.SetMapID then WorldMapFrame:SetMapID(map) end
 	end
+end
+
+function Pins.Nearest(id)
+	local map = playerMap()
+	local points = Pins.QuestPoints(id, map)
+	if #points == 0 then
+		map = ns.Tracker.QuestMap(id)
+		points = Pins.QuestPoints(id, map)
+		local first = points[1]
+		if not first then return nil end
+		return map, first.x, first.y, first.title
+	end
+	local px, py
+	if C_Map and C_Map.GetPlayerMapPosition then
+		local ok, pos = pcall(C_Map.GetPlayerMapPosition, map, "player")
+		if ok and pos and not ns.IsSecret(pos) then
+			px, py = pos.x, pos.y
+			if pos.GetXY then px, py = pos:GetXY() end
+		end
+	end
+	if type(px) ~= "number" or type(py) ~= "number" or ns.IsSecret(px) or ns.IsSecret(py) then
+		local first = points[1]
+		return map, first.x, first.y, first.title
+	end
+	local r = worldRect(map)
+	local sx, sy = r and math.abs(r.dw) or 1.5, r and math.abs(r.dn) or 1
+	local best, bestDist
+	for _, pin in ipairs(points) do
+		local dx, dy = (pin.x - px) * sx, (pin.y - py) * sy
+		local d = dx * dx + dy * dy
+		if not bestDist or d < bestDist then best, bestDist = pin, d end
+	end
+	return map, best.x, best.y, best.title
 end

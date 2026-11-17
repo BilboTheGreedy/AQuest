@@ -27,14 +27,36 @@ end
 local function fromData(tooltip, data)
 	if tooltip ~= GameTooltip then return end
 	local guid = data and data.guid
-	if not guid and UnitGUID then
+	if ns.IsSecret(guid) then return end
+	if guid == nil and UnitGUID then
 		local ok, g = pcall(UnitGUID, "mouseover")
 		if ok then guid = g end
 	end
 	addLines(tooltip, npcFromGuid(guid))
 end
 
+local function itemLines(tooltip, data)
+	if tooltip ~= GameTooltip and tooltip ~= ItemRefTooltip then return end
+	if not ns.db or not ns.db.tooltip then return end
+	local id = data and data.id
+	if ns.IsSecret(id) or type(id) ~= "number" then return end
+	local list = ns.Log.items[id]
+	if not list then return end
+	for _, entry in ipairs(list) do
+		local e = entry.quest
+		local r, g, b = ns.QuestColor(e.id)
+		tooltip:AddLine(e.title or ns.QuestTitle(e.id), r, g, b)
+		if entry.text then tooltip:AddLine("  " .. entry.text, 0.9, 0.9, 0.92) end
+	end
+	tooltip:Show()
+end
+
 ns:Listen("LOGIN", function()
+	if TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall and Enum and Enum.TooltipDataType and Enum.TooltipDataType.Item then
+		pcall(TooltipDataProcessor.AddTooltipPostCall, Enum.TooltipDataType.Item, function(tooltip, data)
+			pcall(itemLines, tooltip, data)
+		end)
+	end
 	local hooked = false
 	if TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall and Enum and Enum.TooltipDataType and Enum.TooltipDataType.Unit then
 		hooked = pcall(TooltipDataProcessor.AddTooltipPostCall, Enum.TooltipDataType.Unit, function(tooltip, data)

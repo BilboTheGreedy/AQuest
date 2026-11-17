@@ -124,7 +124,7 @@ ns.SORTS = {
 	[-261] = "Hunter", [-262] = "Priest", [-263] = "Druid", [-264] = "Tailoring", [-284] = "Special",
 	[-304] = "Cooking", [-324] = "First Aid", [-364] = "Darkmoon Faire", [-365] = "Ahn'Qiraj War",
 	[-366] = "Lunar Festival", [-367] = "Reputation", [-368] = "Invasion", [-369] = "Midsummer",
-	[-370] = "Brewfest", [-284] = "Special",
+	[-370] = "Brewfest",
 }
 
 local RACEBIT = { 1, 2, 4, 8, 16, 32, 64, 128 }
@@ -210,7 +210,19 @@ function ns.StarterPlace(q)
 	end
 	for _, id in ipairs(q.s3 or EMPTY) do
 		local it = ns.Item(id)
-		if it then return it.name .. " (item)" end
+		if it then
+			local n = it.npcs[1] and ns.Npc(it.npcs[1])
+			if n and #it.npcs <= 10 then
+				local map, x, y = someSpawn(n.spawns)
+				return it.name .. " (item from " .. n.name .. ")", map, x, y
+			end
+			local o = it.objects[1] and ns.Object(it.objects[1])
+			if o then
+				local map, x, y = someSpawn(o.spawns)
+				return it.name .. " (item from " .. o.name .. ")", map, x, y
+			end
+			return it.name .. " (item)"
+		end
 	end
 end
 

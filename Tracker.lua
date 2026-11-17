@@ -32,18 +32,24 @@ local function line(i)
 		end
 		if button == "RightButton" then
 			local id = self.quest
-			UI.Menu(self, {
+			local entries = {
 				{ text = ns.QuestTitle(id), title = true },
 				{ text = "Open in journal", func = function() ns.Journal.ShowQuest(id) end },
 				{ text = "Show on map", func = function() Tracker.ShowOnMap(id) end },
-				{ text = "Stop tracking", func = function() Tracker.SetTracked(id, false) end },
-				{ text = "Options", title = true },
-				UI.Check(ns.db.trackerDb, "locked", "Lock the tracker"),
-				{ text = "Hide the tracker", func = function()
-					ns.db.tracker = false
-					ns:Fire("OPTIONS")
-				end },
-			})
+			}
+			if ns.CanWaypoint() then
+				entries[#entries + 1] = { text = "Waypoint to the nearest objective", func = function() ns.NearestWaypoint(id) end }
+			end
+			entries[#entries + 1] = { text = "Stop tracking", func = function() Tracker.SetTracked(id, false) end }
+			entries[#entries + 1] = { text = "Options", title = true }
+			entries[#entries + 1] = UI.Check(ns.db.trackerDb, "locked", "Lock the tracker")
+			entries[#entries + 1] = { text = "Hide the tracker", func = function()
+				ns.db.tracker = false
+				ns:Fire("OPTIONS")
+			end }
+			UI.Menu(self, entries)
+		elseif IsShiftKeyDown and IsShiftKeyDown() and ns.CanWaypoint() then
+			ns.NearestWaypoint(self.quest)
 		else
 			ns.Journal.ShowQuest(self.quest)
 		end
@@ -73,25 +79,31 @@ end
 
 function Tracker.SetTracked(id, on)
 	ns.chardb.tracked[id] = on and true or nil
-	if on then
-		if C_QuestLog and C_QuestLog.AddQuestWatch then pcall(C_QuestLog.AddQuestWatch, id) end
-	else
-		if C_QuestLog and C_QuestLog.RemoveQuestWatch then pcall(C_QuestLog.RemoveQuestWatch, id) end
+	local modern = C_QuestLog and C_QuestLog.AddQuestWatch and C_QuestLog.RemoveQuestWatch
+	if modern then
+		pcall(on and C_QuestLog.AddQuestWatch or C_QuestLog.RemoveQuestWatch, id)
+	elseif GetQuestLogIndexByID and AddQuestWatch and RemoveQuestWatch then
+		local ok, index = pcall(GetQuestLogIndexByID, id)
+		if ok and type(index) == "number" and index > 0 then pcall(on and AddQuestWatch or RemoveQuestWatch, index) end
 	end
 	Tracker.Refresh()
 	ns:Fire("TRACK_CHANGED")
 end
 
-function Tracker.ShowOnMap(id)
+function Tracker.QuestMap(id)
 	local e = ns.Log.quests[id]
 	local q = ns.Quest(id)
-	if not q then return end
+	if not q then return nil end
 	local map
 	if e and not e.complete then
 		for _, npc in ipairs(q.oc or {}) do
 			local n = ns.Npc(npc)
 			if n then map = next(n.spawns) end
 			if map then break end
+		end
+		if not map and q.ok then
+			local n = ns.Npc(q.ok[1][1])
+			if n then map = next(n.spawns) end
 		end
 		if not map and q.oi then
 			local it = ns.Item(q.oi[1])
@@ -115,7 +127,16 @@ function Tracker.ShowOnMap(id)
 		local _, m = ns.StarterPlace(q)
 		map = m
 	end
-	ns.Pins.ShowOnMap(map)
+	return map
+end
+
+function Tracker.ShowOnMap(id)
+	local map
+	if C_Map and C_Map.GetBestMapForUnit then
+		local ok, here = pcall(C_Map.GetBestMapForUnit, "player")
+		if ok and type(here) == "number" and #ns.Pins.QuestPoints(id, here) > 0 then map = here end
+	end
+	ns.Pins.ShowOnMap(map or Tracker.QuestMap(id))
 end
 
 local function build()
@@ -236,7 +257,15 @@ ns:Listen("LOG_CHANGED", function()
 	end
 	Tracker.Refresh()
 end)
-ns:On("QUEST_WATCH_LIST_CHANGED", function() ns.Debounce("watch", 0.2, Tracker.Refresh) end)
+ns:On("QUEST_WATCH_LIST_CHANGED", function(id, added)
+	if type(id) == "number" and not ns.IsSecret(id) and ns.chardb and C_QuestLog and C_QuestLog.GetQuestWatchType then
+		ns.chardb.tracked[id] = watched(id) and ns.Log.quests[id] and true or nil
+	end
+	ns.Debounce("watch", 0.2, function()
+		Tracker.Refresh()
+		ns:Fire("TRACK_CHANGED")
+	end)
+end)
 ns:On("QUEST_WATCH_UPDATE", function() ns.Debounce("watch", 0.2, Tracker.Refresh) end)
 ns:Listen("OPTIONS", Tracker.Refresh)
 ns:Listen("LAYOUT_RESET", function()
